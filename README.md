@@ -72,6 +72,6 @@ Once the bot is running, you can use the following commands:
 I always welcome contributions! If you'd like to contribute, please follow the standard GitHub fork & pull request process. If you have any specific questions or need guidance, feel free to create an issue.
 
 ## License
-This project is licensed under the GNU License - see the [LICENSE.md](LICENSE.md) file for details.
+This project is licensed under the GNU License - see the [LICENSE](LICENSE) file for details.
 
 ![RocketGod](https://github.com/RocketGod-git/shell-access-discord-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
