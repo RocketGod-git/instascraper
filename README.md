@@ -37,7 +37,7 @@ Follow the steps below to set up the bot on your system:
 
 2. **Install dependencies**:
    ```bash
-   Automatically installs required packages!
+   Automatically installs required packages
    ```
 
 3. **Configure the bot** by editing the `config.json` file. [See the configuration section](#configuration) for details.
@@ -59,7 +59,8 @@ You will need to modify the `config.json` file to include your specific details:
 ```
 - **TOKEN**: Your Discord bot token.
 - **DISCORD_CHANNEL_NAME**: The name of the channel where the bot will send notifications.
-- **INSTAGRAM_USERNAMES**: An array of Instagram usernames you want to track initially. Leave the usernames blank [] or prefill some if you want.
+- **INSTAGRAM_USERNAMES**: An array of Instagram usernames you want to track initially.
+- **                       Leave the usernames blank [] or prefill some if you want.
 
 ## Usage
 Once the bot is running, you can use the following commands:
@@ -73,3 +74,5 @@ I always welcome contributions! If you'd like to contribute, please follow the s
 
 ## License
 This project is licensed under the GNU License - see the [LICENSE.md](LICENSE.md) file for details.
+
+![RocketGod](https://github.com/RocketGod-git/shell-access-discord-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
