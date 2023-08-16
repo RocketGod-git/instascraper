@@ -60,7 +60,7 @@ You will need to modify the `config.json` file to include your specific details:
 - **TOKEN**: Your Discord bot token.
 - **DISCORD_CHANNEL_NAME**: The name of the channel where the bot will send notifications.
 - **INSTAGRAM_USERNAMES**: An array of Instagram usernames you want to track initially.
-- **                       Leave the usernames blank [] or prefill some if you want.
+                           Leave the usernames blank [] or prefill some if you want.
 
 ## Usage
 Once the bot is running, you can use the following commands:
