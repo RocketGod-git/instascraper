@@ -16,6 +16,11 @@
 import subprocess
 import logging
 import importlib.util
+from random import randint
+from time import sleep
+
+# Sleep for a random number of seconds between 5 and 15
+sleep(randint(5, 15))
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,6 +46,8 @@ import json
 import instaloader
 from datetime import datetime
 import requests
+import asyncio
+
 
 # Initialize instaloader
 L = instaloader.Instaloader()
@@ -81,37 +88,73 @@ def load_last_post_times():
 last_post_times = load_last_post_times()
 last_story_times = {}
 
-def is_private(username):
-    """Check if an Instagram account is private."""
+def check_profile(username):
+    """Check if an Instagram account is private or doesn't exist."""
     try:
         profile = instaloader.Profile.from_username(L.context, username)
-        return profile.is_private
+        return True, "private" if profile.is_private else "public"
+    except instaloader.ProfileNotExistsException:
+        return False, "nonexistent"
     except instaloader.InstaloaderException as e:
         logging.error(f"Instaloader error for {username}: {e}")
-        return True
+        return False, "error"
     except Exception as e:
         logging.error(f"Unknown error checking profile privacy for {username}: {e}")
-        return True
+        return False, "error"
+
+async def scrape_posts_for_user(username, send_all=False):
+    try:
+        profile = instaloader.Profile.from_username(L.context, username)
+        posts_urls = []
+        for idx, post in enumerate(profile.get_posts()):
+            if idx >= 50:
+                break
+            
+            # If send_all is True, send all posts. Otherwise, only send new posts.
+            if send_all or username not in last_post_times or post.date_utc > last_post_times[username]:
+                last_post_times[username] = post.date_utc
+                posts_urls.append(f"Post from `{username}` at {datetime.utcnow()}: {post.url}")
+
+        if posts_urls:
+            save_last_post_times()
+            thread = await get_thread_for_user(username)
+            for post_url in posts_urls:  # Send each post URL separately
+                await thread.send(post_url)
+                await asyncio.sleep(2)  # Add a 2-second delay between each send to avoid rate limits
+    except instaloader.InstaloaderException as e:
+        logging.error(f"Instaloader error for {username}: {e}")
+    except Exception as e:
+        logging.error(f"Unknown error scraping for {username}: {e}")
+   
+async def get_thread_for_user(username):
+    channel = discord.utils.get(bot.get_all_channels(), name=config["DISCORD_CHANNEL_NAME"])
+    thread = discord.utils.get(channel.threads, name=username)
+    if not thread:
+        thread = await channel.create_thread(name=username)
+        logging.info(f"Created a thread for {username}.")
+    return thread
 
 async def scrape_username(username):
     logging.info(f"Starting scraping for {username}.")
-    channel = discord.utils.get(bot.get_all_channels(), name=config["DISCORD_CHANNEL_NAME"])
-    if not channel:
-        logging.warning(f"Couldn't find channel named {config['DISCORD_CHANNEL_NAME']}.")
+    
+    thread = await get_thread_for_user(username) # Get the thread here
+    
+    if not thread:
+        logging.warning(f"Couldn't find or create thread for {username}.")
         return
 
+    await scrape_posts_for_user(username)
+    
     try:
-        # Check if a thread for the username exists
-        thread = discord.utils.get(channel.threads, name=username)
-        if not thread:
-            # If not, create a thread for the username
-            thread = await channel.create_thread(name=username)
-            logging.info(f"Created a thread for {username}.")
-            await channel.send(f"Created a new thread for `{username}` to keep track of their posts!")
 
         # Construct and check the story URL for the user
         story_url = f"https://instagram.com/stories/{username}/"
         response = requests.get(story_url)
+        if response.status_code == 200:
+            last_story_times[username] = datetime.utcnow()  # Update the timestamp
+            await thread.send(f"Possible Story URL for `{username}`: {story_url}")
+        else:
+            logging.info(f"No stories found for `{username}`. Status code: {response.status_code}")
 
         # Check if the story URL was posted in the last 24 hours
         last_story_time = last_story_times.get(username, None)
@@ -152,13 +195,18 @@ async def add(ctx, username: str):
         return
 
     if username not in config["INSTAGRAM_USERNAMES"]:
-        if not is_private(username):
+        success, status = check_profile(username) # Check the profile here
+        if success and status == "public":
             config["INSTAGRAM_USERNAMES"].append(username)
             save_config()
             await ctx.send(f"Added `{username}` to the list!")
-            await scrape_username(username)  # Scrape the account immediately
+            await scrape_posts_for_user(username, send_all=True) 
+        elif status == "private":
+            await ctx.send(f"Profile `{username}` is private. Cannot add!")
+        elif status == "nonexistent":
+            await ctx.send(f"Profile `{username}` does not exist. Cannot add!")
         else:
-            await ctx.send(f"Profile `{username}` is private or an error occurred!")
+            await ctx.send(f"An error occurred while checking the profile `{username}`. Please try again later.")
     else:
         await ctx.send(f"`{username}` is already in the list!")
 
@@ -178,6 +226,12 @@ async def remove(ctx, username: str):
         if thread:
             await thread.delete()
             logging.info(f"Deleted thread for {username}.")
+
+        # Remove the last scrape time for the username
+        if username in last_post_times:
+            del last_post_times[username]
+            save_last_post_times()
+            logging.info(f"Removed last scrape time for {username}.")
             
         await ctx.send(f"Removed `{username}` from the list and deleted their thread!")
     else:
@@ -195,45 +249,27 @@ async def list(ctx):
 async def scrape_instagram():
     logging.info("Starting the scraping loop.")
     for username in config["INSTAGRAM_USERNAMES"]:
-        logging.info(f"Scraping {username}.")
-        await scrape_username(username)  # Scrape asynchronously
-
-        try:
-            channel = discord.utils.get(bot.get_all_channels(), name=config["DISCORD_CHANNEL_NAME"])
-            # Check if a thread for the username exists
-            thread = discord.utils.get(channel.threads, name=username)
-            if not thread:
-                # If not, create a thread for the username
-                thread = await channel.create_thread(name=username)
-                logging.info(f"Created a thread for {username}.")
-
-            profile = instaloader.Profile.from_username(L.context, username)
-            
-            # Get the latest 50 posts
-            posts = []
-            for idx, post in enumerate(profile.get_posts()):
-                if idx >= 50:
-                    break
-                posts.append(post)
-
-            for post in posts:
-                if username not in last_post_times or post.date_utc > last_post_times[username]:
-                    last_post_times[username] = post.date_utc
-                    save_last_post_times()
-                    await thread.send(f"New post from `{username}` at {datetime.utcnow()}: {post.url}")
-                    break  # Only consider the latest post
-                
-        except instaloader.InstaloaderException as e:
-            logging.error(f"Instaloader error for {username}: {e}")
-        except Exception as e:
-            logging.error(f"Unknown error scraping for {username}: {e}")
-
+        retries = 3
+        while retries > 0:
+            try:
+                logging.info(f"Scraping {username}.")
+                await scrape_posts_for_user(username)
+                await asyncio.sleep(10)  # Use asyncio.sleep here
+                break
+            except instaloader.InstaloaderException as e:
+                logging.warning(f"Instaloader error for {username}. Retries left: {retries}. Error: {str(e)}")
+            except Exception as e:
+                logging.warning(f"Unexpected error scraping {username}. Retries left: {retries}. Error: {str(e)}")
+            retries -= 1
+            await asyncio.sleep(60)  # Use asyncio.sleep here as well
     logging.info("Finished the scraping loop.")
 
 @bot.event
 async def on_ready():
     logging.info(f'Bot is logged in as {bot.user.name}({bot.user.id})')
-    scrape_instagram.start()  # Then start the regular scraping task
+    if not scrape_instagram.is_running():
+        scrape_instagram.start()
+        logging.info("Scrape task has been started.")
 
 @bot.event
 async def on_command_error(ctx, error):
