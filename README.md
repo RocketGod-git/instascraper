@@ -1,4 +1,4 @@
-# InstaScraper Discord Bot
+# InstaScraper (Instagram Scraping Discord Bot)
 
 InstaScraper is a Discord bot that tracks Instagram user posts and stories and notifies a designated Discord channel. Keep track of your favorite influencers, friends, or anyone you wish to follow on Instagram, right from your Discord server. Great for OSINT. 
 Each user gets their own thread in your specified channel. Updates every 5 minutes.
@@ -37,7 +37,7 @@ Follow the steps below to set up the bot on your system:
 
 2. **Install dependencies**:
    ```bash
-   Automatically installs required packages!
+   Automatically installs required packages
    ```
 
 3. **Configure the bot** by editing the `config.json` file. [See the configuration section](#configuration) for details.
@@ -72,4 +72,6 @@ Once the bot is running, you can use the following commands:
 I always welcome contributions! If you'd like to contribute, please follow the standard GitHub fork & pull request process. If you have any specific questions or need guidance, feel free to create an issue.
 
 ## License
-This project is licensed under the GNU License - see the [LICENSE.md](LICENSE.md) file for details.
+This project is licensed under the GNU License - see the [LICENSE](LICENSE) file for details.
+
+![RocketGod](https://github.com/RocketGod-git/shell-access-discord-bot/assets/57732082/c68635fa-b89d-4f74-a1cb-5b5351c22c98)
