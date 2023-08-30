@@ -45,9 +45,18 @@ from discord.ext import commands, tasks
 import json
 import instaloader
 from datetime import datetime
-import requests
+import aiohttp
 import asyncio
+import re
+import random
 
+def sanitize_username(username):
+    """Sanitizes Instagram usernames by removing characters that aren't alphanumeric, underscores, or periods."""
+    return re.sub(r'[^a-zA-Z0-9_.]', '', username)
+
+async def fetch_profile(username):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, instaloader.Profile.from_username, L.context, username)
 
 # Initialize instaloader
 L = instaloader.Instaloader()
@@ -56,11 +65,12 @@ L = instaloader.Instaloader()
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-# Initialize instaloader with a custom rate controller
 class MyRateController(instaloader.RateController):
     def sleep(self, secs):
-        logging.info(f"Sleeping for {secs} seconds due to rate limits.")
-        super().sleep(secs)
+        # Add a random sleep time to further avoid detection
+        sleep_time = secs + random.randint(1, 5)
+        logging.info(f"Sleeping for {sleep_time} seconds due to rate limits.")
+        super().sleep(sleep_time)
 
 L = instaloader.Instaloader(rate_controller=MyRateController)
 
@@ -88,10 +98,11 @@ def load_last_post_times():
 last_post_times = load_last_post_times()
 last_story_times = {}
 
-def check_profile(username):
+async def check_profile(username):
     """Check if an Instagram account is private or doesn't exist."""
+    username = sanitize_username(username) 
     try:
-        profile = instaloader.Profile.from_username(L.context, username)
+        profile = await fetch_profile(username)
         return True, "private" if profile.is_private else "public"
     except instaloader.ProfileNotExistsException:
         return False, "nonexistent"
@@ -104,7 +115,7 @@ def check_profile(username):
 
 async def scrape_posts_for_user(username, send_all=False):
     try:
-        profile = instaloader.Profile.from_username(L.context, username)
+        profile = await fetch_profile(username)
         posts_urls = []
         for idx, post in enumerate(profile.get_posts()):
             if idx >= 50:
@@ -137,49 +148,48 @@ async def get_thread_for_user(username):
 async def scrape_username(username):
     logging.info(f"Starting scraping for {username}.")
     
-    thread = await get_thread_for_user(username) # Get the thread here
+    thread = await get_thread_for_user(username)  # Get the thread here
     
     if not thread:
         logging.warning(f"Couldn't find or create thread for {username}.")
         return
 
     await scrape_posts_for_user(username)
-    
+
     try:
+        async with aiohttp.ClientSession() as session:  # Using aiohttp
+            story_url = f"https://instagram.com/stories/{username}/"  # Define the story_url
+            async with session.get(story_url) as response:
+                if response.status == 200:
+                    last_story_times[username] = datetime.utcnow()  # Update the timestamp
+                    await thread.send(f"Possible Story URL for `{username}`: {story_url}")
+                else:
+                    logging.info(f"No stories found for `{username}`. Status code: {response.status_code}")
 
-        # Construct and check the story URL for the user
-        story_url = f"https://instagram.com/stories/{username}/"
-        response = requests.get(story_url)
-        if response.status_code == 200:
-            last_story_times[username] = datetime.utcnow()  # Update the timestamp
-            await thread.send(f"Possible Story URL for `{username}`: {story_url}")
-        else:
-            logging.info(f"No stories found for `{username}`. Status code: {response.status_code}")
+                # Check if the story URL was posted in the last 24 hours
+                last_story_time = last_story_times.get(username, None)
+                if not last_story_time or (datetime.utcnow() - last_story_time).total_seconds() > 24 * 60 * 60:
+                    if response.status_code == 200:
+                        last_story_times[username] = datetime.utcnow()  # Update the timestamp
+                        await thread.send(f"Story URL for `{username}`: {story_url}")
+                    else:
+                        await thread.send(f"No stories found for `{username}`.")
 
-        # Check if the story URL was posted in the last 24 hours
-        last_story_time = last_story_times.get(username, None)
-        if not last_story_time or (datetime.utcnow() - last_story_time).total_seconds() > 24 * 60 * 60:
-            if response.status_code == 200:
-                last_story_times[username] = datetime.utcnow()  # Update the timestamp
-                await thread.send(f"Story URL for `{username}`: {story_url}")
-            else:
-                await thread.send(f"No stories found for `{username}`.")
+                profile = await fetch_profile(username)(L.context, username)
 
-        profile = instaloader.Profile.from_username(L.context, username)
+                # Check the last post time for the username, if it exists
+                latest_post_time = last_post_times.get(username, None)
 
-        # Check the last post time for the username, if it exists
-        latest_post_time = last_post_times.get(username, None)
-
-        # Collect new posts
-        for idx, post in enumerate(profile.get_posts()):
-            if idx >= 50:
-                break
-            if not latest_post_time or post.date_utc > latest_post_time:
-                last_post_times[username] = post.date_utc
-                save_last_post_times()
-                await thread.send(f"New post from `{username}` at {datetime.utcnow()}: {post.url}")
-        
-        logging.info(f"Finished scraping for {username}.")
+                # Collect new posts
+                for idx, post in enumerate(profile.get_posts()):
+                    if idx >= 50:
+                        break
+                    if not latest_post_time or post.date_utc > latest_post_time:
+                        last_post_times[username] = post.date_utc
+                        save_last_post_times()
+                        await thread.send(f"New post from `{username}` at {datetime.utcnow()}: {post.url}")
+                
+                logging.info(f"Finished scraping for {username}.")
 
     except instaloader.LoginRequiredException:
         logging.error(f"Instagram is requiring login to access the profile of {username}.")
@@ -195,7 +205,7 @@ async def add(ctx, username: str):
         return
 
     if username not in config["INSTAGRAM_USERNAMES"]:
-        success, status = check_profile(username) # Check the profile here
+        success, status = await check_profile(username) 
         if success and status == "public":
             config["INSTAGRAM_USERNAMES"].append(username)
             save_config()
@@ -245,7 +255,7 @@ async def list(ctx):
     usernames = ", ".join(config["INSTAGRAM_USERNAMES"])
     await ctx.send(f"Currently tracking: {usernames}")
 
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=30)
 async def scrape_instagram():
     logging.info("Starting the scraping loop.")
     for username in config["INSTAGRAM_USERNAMES"]:
@@ -254,14 +264,14 @@ async def scrape_instagram():
             try:
                 logging.info(f"Scraping {username}.")
                 await scrape_posts_for_user(username)
-                await asyncio.sleep(10)  # Use asyncio.sleep here
+                await asyncio.sleep(random.randint(10, 30))
                 break
             except instaloader.InstaloaderException as e:
                 logging.warning(f"Instaloader error for {username}. Retries left: {retries}. Error: {str(e)}")
             except Exception as e:
                 logging.warning(f"Unexpected error scraping {username}. Retries left: {retries}. Error: {str(e)}")
             retries -= 1
-            await asyncio.sleep(60)  # Use asyncio.sleep here as well
+            await asyncio.sleep(random.randint(10, 30))
     logging.info("Finished the scraping loop.")
 
 @bot.event
@@ -270,13 +280,6 @@ async def on_ready():
     if not scrape_instagram.is_running():
         scrape_instagram.start()
         logging.info("Scrape task has been started.")
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.send("Invalid command used.")
-    else:
-        logging.error(f"Unexpected error: {error}")
 
 if __name__ == "__main__":
     try:
